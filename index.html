@@ -182,6 +182,64 @@
   }
   .preview-blank{height:4px;}
 
+  .preview-synpair{
+    padding:8px 0;
+    border-bottom:1px dashed var(--border);
+    font-size:0.88rem;
+    line-height:1.5;
+    text-align:center;
+    color:var(--ink-soft);
+  }
+  .preview-synpair:last-child{border-bottom:none;}
+  .preview-synsep{
+    color:var(--green);
+    font-family:'IBM Plex Mono', monospace;
+    margin:0 8px;
+    font-weight:600;
+  }
+
+  .dup-panel{
+    margin-top:18px;
+    background:var(--card);
+    border:1.5px solid var(--border);
+    border-radius:3px;
+    padding:14px 16px;
+    max-width:720px;
+    margin-left:auto;
+    margin-right:auto;
+  }
+  .dup-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    font-size:0.85rem;
+    color:var(--ink-soft);
+    margin-bottom:10px;
+    padding-bottom:8px;
+    border-bottom:1px solid var(--border);
+  }
+  .dup-list{display:flex; flex-direction:column; gap:8px;}
+  .dup-row{
+    padding:9px 11px;
+    border-radius:3px;
+    background:var(--paper);
+    border-left:3px solid var(--border);
+  }
+  .dup-row.isolated{border-left-color:var(--red);}
+  .dup-row.related{border-left-color:var(--green);}
+  .dup-meta{
+    display:flex;
+    justify-content:space-between;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.72rem;
+    color:var(--pencil);
+    margin-bottom:4px;
+  }
+  .dup-tag.isolated{color:var(--red);}
+  .dup-tag.related{color:var(--green);}
+  .dup-stmt{font-family:'Source Serif 4', serif; font-size:0.92rem; line-height:1.4;}
+  .dup-stmt + .dup-stmt{margin-top:3px;}
+
   /* Quiz view */
   .controls-bar{
     display:flex;
@@ -391,6 +449,7 @@
         <div class="row">
           <button class="btn-primary" id="parse-btn">Katalog laden</button>
           <button class="btn-ghost" id="example-btn">Beispiel einfügen</button>
+          <button class="btn-ghost" id="dup-check-btn">Duplikate prüfen</button>
         </div>
         <div class="status" id="parse-status"></div>
         <div class="save-note" id="save-note"></div>
@@ -400,10 +459,19 @@
         <div class="preview-list" id="preview-list"></div>
       </div>
     </div>
+    <div class="dup-panel" id="dup-panel" hidden>
+      <div class="dup-header">
+        <span id="dup-summary"></span>
+        <button class="link-btn" id="dup-close-btn">Ausblenden</button>
+      </div>
+      <div class="dup-list" id="dup-list"></div>
+    </div>
     <div class="syntax-help">
       Kommentarzeilen mit <code>#</code> beginnen. Groß-/Kleinschreibung und Leerzeichen in Namen sind egal, solange du dieselbe Bezeichnung konsequent benutzt.<br>
       LaTeX: einfach <code>$...$</code> für Inline-Formeln in die Aussage schreiben, z.B. <code>$f'(x_0)$ existiert</code>.<br>
-      Erklärung: optional ans Zeilenende <code>|| Erklärungstext</code> anhängen — wird nach der Antwort angezeigt (auch mit LaTeX).
+      Erklärung: optional ans Zeilenende <code>|| Erklärungstext</code> anhängen — wird nach der Antwort angezeigt (auch mit LaTeX).<br>
+      Synonyme: <code>~~ Aussage1 :: Aussage2</code> markiert zwei Formulierungen als bloß umformuliertes Dasselbe. Sie zählen für die Herleitungskette wie <code>&lt;=&gt;</code> mit, aber genau <em>dieses</em> Paar wird im Quiz nie direkt gegeneinander abgefragt (Fragen zu einer der beiden Formulierungen mit anderen Aussagen bleiben möglich). Auch im Duplikat-Check tauchen so markierte Paare nicht mehr als „isoliert“ oder „verknüpft“ auf, da sie schon als bekanntes Synonym gelten.<br>
+      „Duplikate prüfen“: vergleicht alle Aussagen paarweise auf Textähnlichkeit und listet auffällig ähnliche Paare auf. Rot markierte Paare haben zusätzlich <em>keine</em> Beziehung im Katalog — das sind die gefährlichen Fälle, in denen dieselbe Aussage versehentlich als zwei getrennte Knoten existiert.
     </div>
   </div>
 
@@ -471,6 +539,11 @@
   const historySummary = document.getElementById('history-summary');
   const toggleHistoryBtn = document.getElementById('toggle-history-btn');
   const clearHistoryBtn = document.getElementById('clear-history-btn');
+  const dupCheckBtn = document.getElementById('dup-check-btn');
+  const dupCloseBtn = document.getElementById('dup-close-btn');
+  const dupPanel = document.getElementById('dup-panel');
+  const dupSummary = document.getElementById('dup-summary');
+  const dupList = document.getElementById('dup-list');
 
   const HAS_CLAUDE_STORAGE = typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
   const HAS_LOCAL_STORAGE = (() => {
@@ -504,38 +577,40 @@
 
   const EXAMPLE = `# --- Folgen ---
 $(a_n)$ konvergiert => $(a_n)$ hat genau einen Häufungswert ($L$) || Jede konvergente Folge besitzt genau einen Häufungswert, nämlich ihren Grenzwert $L$.
-$(a_n)$ monoton fallend, $a_n>0$ => $(a_n\\cdot b_n)$ konvergiert, wobei $(b_n)$ Nullfolge || $(a_n)$ ist durch $a_1$ nach oben und durch $0$ nach unten beschränkt. Also ist $(a_n)$ beschränkt. Beschränkte Folge $\\cdot$ Nullfolge $\\to0$.
+$(a_n)$ monoton fallend, $a_n>0$ => $(a_n\cdot b_n)$ konvergiert, wobei $(b_n)$ Nullfolge || $(a_n)$ ist durch $a_1$ nach oben und durch $0$ nach unten beschränkt. Also ist $(a_n)$ beschränkt. Beschränkte Folge $\cdot$ Nullfolge $\to0$.
 $(a_n)$ monoton fallend, $a_n>0$ => $(a_n)$ konvergiert || $(a_n)$ ist monoton fallend und nach unten durch $0$ beschränkt. Nach dem Monotoniekriterium konvergiert $(a_n)$.
 $(a_n)$ konvergent => $(a_n)$ beschränkt || Jede konvergente Folge ist beschränkt.
 $(a_n)$ ist Nullfolge => $(a_n)$ ist beschränkt || Jede Nullfolge konvergiert gegen $0$ und ist daher beschränkt.
 $(a_n)$ beschränkt und monoton => $(a_n)$ konvergent || Jede monotone und beschränkte Folge konvergiert (Monotoniekriterium).
-$\\limsup a_n = \\liminf a_n = L$ <=> $(a_n)$ konvergiert || Eine Folge konvergiert genau dann, wenn $\\limsup a_n$ und $\\liminf a_n$ übereinstimmen. Der gemeinsame Wert ist der Grenzwert.
-$\\limsup a_n = \\liminf a_n = L$ => $(a_n)$ hat genau einen Häufungswert ($L$) || Dann konvergiert $(a_n)$ gegen $L$. Somit ist $L$ der einzige Häufungswert.
-$(a_n)$ ist monoton <=> $\\left(\\frac{1}{a_n}\\right)$ ist monoton || Vorausgesetzt $a_n\\neq0$ für alle $n$. Die Funktion $1/x$ ist auf $(0,\\infty)$ und auf $(-\\infty,0)$ streng fallend, daher wird die Monotonierichtung umgekehrt.
+$\limsup a_n = \liminf a_n = L$ <=> $(a_n)$ konvergiert || Eine Folge konvergiert genau dann, wenn $\limsup a_n$ und $\liminf a_n$ übereinstimmen. Der gemeinsame Wert ist der Grenzwert.
+$\limsup a_n = \liminf a_n = L$ => $(a_n)$ hat genau einen Häufungswert ($L$) || Dann konvergiert $(a_n)$ gegen $L$. Somit ist $L$ der einzige Häufungswert.
+$(a_n)$ ist monoton <=> $\left(\frac{1}{a_n}\right)$ ist monoton || Vorausgesetzt $a_n\neq0$ für alle $n$. Die Funktion $1/x$ ist auf $(0,\infty)$ und auf $(-\infty,0)$ streng fallend, daher wird die Monotonierichtung umgekehrt.
 
 # --- Reihen ---
-$\\sum a_n$ konvergiert absolut => $\\sum a_n^2$ konvergiert || Aus absoluter Konvergenz folgt $a_n\\to0$. Also gilt ab einem gewissen Index $|a_n|\\le1$ und damit $a_n^2\\le|a_n|$. Nach dem Vergleichskriterium konvergiert $\\sum a_n^2$.
-$\\sum a_n$ konvergiert => $\\limsup\\sqrt[n]{|a_n|}\\le1$ || Aus der Konvergenz der Reihe folgt $a_n\\to0$. Daraus folgt $\\limsup\\sqrt[n]{|a_n|}\\le1$.
-$\\sum a_n$ konvergiert absolut => $\\limsup\\sqrt[n]{|a_n|}\\le1$ || Aus der Konvergenz der Reihe folgt $a_n\\to0$. Daraus folgt $\\limsup\\sqrt[n]{|a_n|}\\le1$.
-$\\sum a_n$ konvergiert absolut => $a_n$ ist Nullfolge ($a_n\\to0$) || Absolute Konvergenz impliziert Konvergenz der Reihe und damit müssen die Summanden gegen $0$ gehen.
-$\\sum a_n$ konvergiert => $a_n\\to0$ || Das ist eine notwendige Bedingung für die Konvergenz einer Reihe. Die Umkehrung gilt nicht, z.B. bei der harmonischen Reihe $\\sum 1/n$.
+$\sum a_n$ konvergiert absolut => $\sum a_n^2$ konvergiert || Aus absoluter Konvergenz folgt $a_n\to0$. Also gilt ab einem gewissen Index $|a_n|\le1$ und damit $a_n^2\le|a_n|$. Nach dem Vergleichskriterium konvergiert $\sum a_n^2$.
+$\sum a_n$ konvergiert => $\limsup\sqrt[n]{|a_n|}\le1$ || Aus der Konvergenz der Reihe folgt $a_n\to0$. Daraus folgt $\limsup\sqrt[n]{|a_n|}\le1$.
+$\sum a_n$ konvergiert absolut => $\limsup\sqrt[n]{|a_n|}\le1$ || Aus der Konvergenz der Reihe folgt $a_n\to0$. Daraus folgt $\limsup\sqrt[n]{|a_n|}\le1$.
+$\sum a_n$ konvergiert absolut => $a_n$ ist Nullfolge ($a_n\to0$) || Absolute Konvergenz impliziert Konvergenz der Reihe und damit müssen die Summanden gegen $0$ gehen.
+$\sum a_n$ konvergiert => $a_n\to0$ || Das ist eine notwendige Bedingung für die Konvergenz einer Reihe. Die Umkehrung gilt nicht, z.B. bei der harmonischen Reihe $\sum 1/n$.
+$\sum a_n$ konvergiert absolut => $\sum a_n$ konvergiert
+
 
 # --- Stetigkeit / Differenzierbarkeit (eindimensional) ---
 $f$ gleichmäßig stetig => $f$ stetig || Gleichmäßige Stetigkeit ist stärker als Stetigkeit und impliziert daher Stetigkeit.
 $f$ stetig auf $[a,b]$ <=> $f$ gleichmäßig stetig auf $[a,b]$ || Nach Heine-Cantor ist jede stetige Funktion auf einer kompakten Menge gleichmäßig stetig. Die Rückrichtung folgt aus gleichmäßig stetig => stetig.
 $f$ stetig auf $[a,b]$ => $f$ Riemann-integrierbar || Jede stetige Funktion auf einem abgeschlossenen und beschränkten Intervall ist Riemann-integrierbar.
 $f$ monoton auf $[a,b]$ => $f$ Riemann-integrierbar || Jede monotone Funktion auf einem abgeschlossenen und beschränkten Intervall ist Riemann-integrierbar.
-$f$ Lipschitz-stetig auf $[a,b]$ => $f$ gleichmäßig stetig auf $[a,b]$ || Aus $|f(x)-f(y)|\\le L|x-y|$ folgt direkt gleichmäßige Stetigkeit, z.B. mit $\\delta=\\varepsilon/L$.
+$f$ Lipschitz-stetig auf $[a,b]$ => $f$ gleichmäßig stetig auf $[a,b]$ || Aus $|f(x)-f(y)|\le L|x-y|$ folgt direkt gleichmäßige Stetigkeit, z.B. mit $\delta=\varepsilon/L$.
 $f$ differenzierbar => $f$ stetig || Differenzierbarkeit impliziert Stetigkeit.
 $f$ nicht Riemann-integrierbar => $f$ nicht stetig || Kontraposition von stetig => Riemann-integrierbar.
 $f$ nicht stetig => $f$ nicht differenzierbar || Kontraposition von differenzierbar => stetig.
-$f$ differenzierbar in $x_0$ <=> $\\lim_{x\\to x_0}\\frac{f(x)-f(x_0)}{x-x_0}$ existiert || Das ist genau die Definition der Differenzierbarkeit in $x_0$. Der Grenzwert ist $f'(x_0)$.
+$f$ differenzierbar in $x_0$ <=> $\lim_{x\to x_0}\frac{f(x)-f(x_0)}{x-x_0}$ existiert || Das ist genau die Definition der Differenzierbarkeit in $x_0$. Der Grenzwert ist $f'(x_0)$.
 $f_n$ konvergiert gleichmäßig gegen $f$ und jedes $f_n$ ist Riemann-integrierbar => $f$ Riemann-integrierbar || Das Gleichmaßkriterium für Riemann-Integrierbarkeit: Der gleichmäßige Grenzwert Riemann-integrierbarer Funktionen ist wieder Riemann-integrierbar.
 $f_n$ konvergiert gleichmäßig => $f_n$ konvergiert punktweise || Gleichmäßige Konvergenz impliziert punktweise Konvergenz.
-$f_n$ konvergiert gleichmäßig gegen $f$ <=> $|f_n(x)-f(x)|\\le a_n$ für alle $x\\in[a,b]$, wobei $a_n\\to0$ || Die Schranke $a_n$ ist unabhängig von $x$ und bildet eine Nullfolge. Das ist eine äquivalente Charakterisierung der gleichmäßigen Konvergenz.
+$f_n$ konvergiert gleichmäßig gegen $f$ <=> $|f_n(x)-f(x)|\le a_n$ für alle $x\in[a,b]$, wobei $a_n\to0$ || Die Schranke $a_n$ ist unabhängig von $x$ und bildet eine Nullfolge. Das ist eine äquivalente Charakterisierung der gleichmäßigen Konvergenz.
 
 # --- Mengen / Kompaktheit ---
-$B\\subseteq\\mathbb R^n$ abgeschlossen und beschränkt <=> $B$ ist kompakt || Nach dem Satz von Heine-Borel ist eine Teilmenge des $\\mathbb R^n$ genau dann kompakt, wenn sie abgeschlossen und beschränkt ist. Beispiel: $[a,b]$ ist kompakt, $(a,b)$ nicht.
+$B\subseteq\mathbb R^n$ abgeschlossen und beschränkt <=> $B$ ist kompakt || Nach dem Satz von Heine-Borel ist eine Teilmenge des $\mathbb R^n$ genau dann kompakt, wenn sie abgeschlossen und beschränkt ist. Beispiel: $[a,b]$ ist kompakt, $(a,b)$ nicht.
 
 # --- Mehrdimensionale Differenzierbarkeit ---
 $f$ stetig partiell differenzierbar => $f$ total differenzierbar || Existieren die partiellen Ableitungen in einer Umgebung eines Punktes und sind sie dort stetig, dann ist $f$ an diesem Punkt total differenzierbar.
@@ -544,21 +619,68 @@ $f$ total differenzierbar => $f$ partiell differenzierbar || Totale Differenzier
 $f$ stetig partiell differenzierbar => $f$ differenzierbar || Unter der üblichen Definition von Differenzierbarkeit in mehreren Variablen bedeutet dies totale Differenzierbarkeit. Stetige partielle Ableitungen sind dafür ein hinreichendes Kriterium.
 $f$ differenzierbar <=> $f$ total differenzierbar || Bei Funktionen mehrerer Variablen bezeichnet „differenzierbar“ üblicherweise totale Differenzierbarkeit.
 
-# --- Integrale (Ungleichungen), $f:[0,b]^2\\to\\mathbb R$ stetig ---
-$f(x,y)\\ge1$ für alle $(x,y)\\in[0,2]^2$ => $\\int_{[0,2]^2} f(x,y)\\,d(x,y)\\ge4$ || Das Quadrat hat Flächeninhalt $4$. Da $f\\ge1$ überall gilt, ist das Integral mindestens $1\\cdot4=4$.
-$f(x,y)\\ge0$ für alle $(x,y)\\in[0,1]^2$ => $\\int_{[0,1]^2} f(x,y)\\,d(x,y)\\ge0$ || Eine überall nichtnegative Funktion hat ein nichtnegatives Integral.
+# --- Integrale (Ungleichungen), $f:[0,b]^2\to\mathbb R$ stetig ---
+$f(x,y)\ge1$ für alle $(x,y)\in[0,2]^2$ => $\int_{[0,2]^2} f(x,y)\,d(x,y)\ge4$ || Das Quadrat hat Flächeninhalt $4$. Da $f\ge1$ überall gilt, ist das Integral mindestens $1\cdot4=4$.
+$f(x,y)\ge0$ für alle $(x,y)\in[0,1]^2$ => $\int_{[0,1]^2} f(x,y)\,d(x,y)\ge0$ || Eine überall nichtnegative Funktion hat ein nichtnegatives Integral.
 
 # --- Matrizen ---
-$A=\\begin{pmatrix}a&b\\\\b&d\\end{pmatrix}$ positiv definit <=> alle Eigenwerte von $A=\\begin{pmatrix}a&b\\\\b&d\\end{pmatrix}$ strikt positiv || Für reelle symmetrische Matrizen gilt: $A$ ist positiv definit genau dann, wenn alle Eigenwerte von $A$ strikt positiv sind.
-$A=\\begin{pmatrix}a&b\\\\b&d\\end{pmatrix}$ positiv definit <=> $a>0$ und $\\det(A)>0$ || Für eine reelle symmetrische $2\\times2$-Matrix gilt nach dem Sylvester-Kriterium: $A$ ist positiv definit genau dann, wenn $a>0$ und $\\det(A)=ad-b^2>0$.
+$A=\begin{pmatrix}a&b\\b&d\end{pmatrix}$ positiv definit <=> alle Eigenwerte von $A=\begin{pmatrix}a&b\\b&d\end{pmatrix}$ strikt positiv || Für reelle symmetrische Matrizen gilt: $A$ ist positiv definit genau dann, wenn alle Eigenwerte von $A$ strikt positiv sind.
+$A=\begin{pmatrix}a&b\\b&d\end{pmatrix}$ positiv definit <=> $a>0$ und $\det(A)>0$ || Für eine reelle symmetrische $2\times2$-Matrix gilt nach dem Sylvester-Kriterium: $A$ ist positiv definit genau dann, wenn $a>0$ und $\det(A)=ad-b^2>0$.
+
+# --- Klausuren ---
+$f$ stetig auf $[a,b]$ => $F(x):=\int_a^x f(t)\,dt$ ist auf $(a,b)$ differenzierbar mit $F'=f$ || Zweiter Hauptsatz der Differential- und Integralrechnung.
+$f$ stetig auf $[a,b]$, $y$ liegt zwischen $f(a)$ und $f(b)$ => $\exists\,c\in[a,b]:f(c)=y$ || Zwischenwertsatz.
+$f$ stetig auf $[a,b]$, differenzierbar auf $(a,b)$ => $\exists\,\xi\in(a,b):f(b)-f(a)=f'(\xi)(b-a)$ || Mittelwertsatz der Differentialrechnung.
+$f$ stetig differenzierbar auf kompaktem Intervall $[a,b]$ => $f$ ist Lipschitz-stetig auf $[a,b]$ || $f'$ ist stetig auf $[a,b]$, nach dem Extremwertsatz also beschränkt: $|f'(x)|\le M$. Mit dem Mittelwertsatz folgt $|f(x)-f(y)|\le M|x-y|$ für alle $x,y\in[a,b]$.
+$f$ differenzierbar auf Intervall $I$, $f'(x)\neq0$ für alle $x\in I$ => $f$ ist streng monoton auf $I$ || Nach dem Zwischenwertsatz kann $f'$ das Vorzeichen nicht wechseln, ohne eine Nullstelle zu haben; also ist $f'$ überall positiv oder überall negativ.
+$f$ streng monoton auf einem Intervall $I$, stetig differenzierbar, $f'(x_0)\neq0$ => $f^{-1}$ ist differenzierbar in $f(x_0)$ mit $(f^{-1})'(f(x_0))=\frac1{f'(x_0)}$ || Eindimensionaler Umkehrsatz.
+$f$ stetig differenzierbar in einer Umgebung von $x_0\in\mathbb R^n$, $\det Df(x_0)\neq0$ => es existiert eine offene Umgebung $U$ von $x_0$, sodass $f:U\to f(U)$ bijektiv ist mit stetig differenzierbarer Umkehrfunktion, und $D(f^{-1})(f(x_0))=Df(x_0)^{-1}$ || Umkehrsatz (Satz über die lokale Umkehrbarkeit).
+$f:\mathbb R^n\times\mathbb R^m\to\mathbb R^m$ stetig differenzierbar, $f(x_0,y_0)=0$, $\det\frac{\partial f}{\partial y}(x_0,y_0)\neq0$ => es existieren $\delta,\eta>0$ und eine stetig differenzierbare Funktion $g:U_\delta(x_0)\to U_\eta(y_0)$ mit $g(x_0)=y_0$ und $f(x,g(x))=0$ auf $U_\delta(x_0)$, wobei $g'(x)=-\left(\frac{\partial f}{\partial y}(x,g(x))\right)^{-1}\frac{\partial f}{\partial x}(x,g(x))$ || Satz über implizit definierte Funktionen.
+$f:D\to\mathbb R^m$ stetig, $D\subseteq\mathbb R^n$ kompakt => $f(D)$ ist kompakt (insbesondere beschränkt) || Stetige Bilder kompakter Mengen sind kompakt; für $D\subseteq\mathbb R$ ist dies der Extremwertsatz.
+$f$ differenzierbar, $f$ hat in einem inneren Punkt $x_0$ ein lokales Extremum => $\nabla f(x_0)=0$ || Notwendige Bedingung für ein lokales Extremum. Die Umkehrung gilt nicht (z.B. Sattelpunkte).
+$f\in C^2(D,\mathbb R)$, $x_0\in\operatorname{int}(D)$, $\nabla f(x_0)=0$, $H_f(x_0)$ positiv definit => $f$ hat in $x_0$ ein striktes lokales Minimum || Hinreichende Bedingung für lokale Extrema über die Hesse-Matrix. Analog: $H_f(x_0)$ negativ definit => striktes lokales Maximum.
+$f\in C^2(D,\mathbb R)$, $D\subseteq\mathbb R^2$, $x_0\in\operatorname{int}(D)$, $\nabla f(x_0)=0$, $\det H_f(x_0)<0$ => $f$ hat in $x_0$ kein lokales Extremum (Sattelpunkt) || Bei einer reellen symmetrischen $2\times2$-Hesse-Matrix bedeutet $\det H_f(x_0)<0$, dass die Eigenwerte unterschiedliches Vorzeichen haben; die Hesse-Matrix ist indefinit. Für $n>2$ ist die Aussage so nicht gültig.
+$f$ total differenzierbar in $x_0$ => für jede Richtung $a$ mit $\|a\|=1$ existiert die Richtungsableitung $\frac{\partial f}{\partial a}(x_0)=\nabla f(x_0)\cdot a$ || Verallgemeinerung von "total differenzierbar => partiell differenzierbar" auf beliebige Richtungen.
+$|g_n(x)|\le c_n$ für alle $x\in D,\,n\in\mathbb N$, $c_n\ge0$, $\sum c_n$ konvergiert => $\sum g_n$ konvergiert gleichmäßig (und damit punktweise) auf $D$ || Kriterium von Weierstraß (Majorantenkriterium für Funktionenreihen).
+$f_n$ stetig für alle $n$, $f_n\to f$ gleichmäßig => $f$ ist stetig || Der gleichmäßige Grenzwert stetiger Funktionen ist stetig.
+$f_n$ stetig auf kompaktem Intervall $[a,b]$ für alle $n$, $f_n\to f$ gleichmäßig => $\lim_{n\to\infty}\int_a^b f_n(x)\,dx=\int_a^b f(x)\,dx$ || Bei gleichmäßiger Konvergenz dürfen Grenzwert und Integral vertauscht werden.
+$\sum a_n$ konvergiert absolut, $(b_n)$ beschränkt => $\sum a_nb_n$ konvergiert absolut || Mit $|b_n|\le C$ folgt $|a_nb_n|\le C|a_n|$; nach dem Majorantenkriterium konvergiert $\sum a_nb_n$ absolut.
+$\exists\,N_0\in\mathbb N,\varepsilon>0\ \forall n\ge N_0:\left|\frac{a_{n+1}}{a_n}\right|\le1-\varepsilon$ => $\sum a_n$ konvergiert absolut || Quotientenkriterium.
+$\forall\varepsilon>0\ \exists N_0\in\mathbb N\ \forall m\in\mathbb N:\left|\sum_{n=N_0}^{N_0+m}a_n\right|<\varepsilon$ <=> $\sum a_n$ konvergiert || Cauchy-Kriterium für Reihen.
+$\sum b_n$ konvergiert => ($\sum a_n$ konvergiert <=> $\sum(a_n+b_n)$ konvergiert) || Die Summe zweier konvergenter Reihen konvergiert; da $a_n=(a_n+b_n)-b_n$, folgt auch die Rückrichtung. Addition einer konvergenten Reihe ändert also das Konvergenzverhalten nicht.
+$(a_n)$ beschränkt, $(b_n)$ Nullfolge => $(a_n\cdot b_n)$ ist Nullfolge || Beschränkte Folge mal Nullfolge ist eine Nullfolge.
+$\exists\,c>0:|a_n|\ge c$ für alle $n$, $(b_n)$ Nullfolge => $(b_n/a_n)$ ist Nullfolge || $(1/a_n)$ ist durch $1/c$ beschränkt, und beschränkte Folge mal Nullfolge ist Nullfolge.
+$(a_n)$ konvergiert gegen $a$, $f$ stetig in $a$ => $(f(a_n))$ konvergiert gegen $f(a)$ || Folgenkriterium der Stetigkeit: stetige Funktionen vertauschen mit Grenzwerten konvergenter Folgen.
+$B\subseteq\mathbb R^n$ messbar, $f,g\in R(B)$, $f\le g$ auf $B$ => $\int_B f(x)\,dx\le\int_B g(x)\,dx$ || Monotonie des Integrals. Verallgemeinert die Spezialfälle $f\ge c$ auf $B$ => $\int_B f\ge c\cdot|B|$.
+$B,C\subseteq\mathbb R^n$ messbar, $B\subseteq C$ => $|B|\le|C|$ || Monotonie des (Lebesgue-)Maßes/Volumens.
+$A\subseteq\mathbb R^n$ ist abgeschlossen <=> $\mathbb R^n\setminus A$ ist offen || Definition/Charakterisierung abgeschlossener Mengen über das offene Komplement.
+$A=\begin{pmatrix}\alpha&\beta\\\beta&\gamma\end{pmatrix}$ mit $\alpha\neq0$, $A$ negativ definit => $\gamma<\beta^2/\alpha$ || Nach dem Sylvester-Kriterium ist $A$ negativ definit genau dann, wenn $\alpha<0$ und $\det A=\alpha\gamma-\beta^2>0$ gilt. Division der letzten Ungleichung durch $\alpha<0$ dreht das Ungleichheitszeichen um und liefert $\gamma<\beta^2/\alpha$.
+$y'(x)=f(x)y(x)$ auf Intervall $I$, $f\in C(I)$, $F$ Stammfunktion von $f$ auf $I$ <=> $y(x)=c\cdot e^{F(x)}$ für ein $c\in\mathbb R$ || Allgemeine Lösung der linearen homogenen Differentialgleichung erster Ordnung. Jede Funktion dieser Form löst die DGL, und jede Lösung hat diese Form.
 
 # --- Vorlesungs-spezifisch ---
-integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
+integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.
+
+# --- Synonym ---
+~~ $f$ Riemann-integrierbar :: Riemann-integrierbar
+~~ $(a_n)$ konvergiert :: $(a_n)$ konvergent
+~~ $f$ Lipschitz-stetig auf $[a,b]$ :: $f$ ist Lipschitz-stetig auf $[a,b]$
+~~ $f$ differenzierbar in $x_0$ :: $f$ total differenzierbar in $x_0$
+~~ $(a_n)$ ist Nullfolge :: $a_n$ ist Nullfolge ($a_n\to0$)
+~~ $f$ ist stetig :: $f$ stetig
+~~ $(a_n)$ ist beschränkt :: $(a_n)$ beschränkt
+
+# --- Weiteres ---
+$f$ stetig differenzierbar auf $[a,b]$ => $f$ Lipschitz-stetig auf $[a,b]$
+$f$ Lipschitz-stetig auf $[a,b]$ => $f$ gleichmäßig stetig auf $[a,b]$
+$f$ gleichmäßig stetig auf $[a,b]$ => $f$ stetig auf $[a,b]$
+$f$ stetig auf $[a,b]$ => $f$ Riemann-integrierbar auf $[a,b]$
+$f$ total differenzierbar in $x_0$ => $f$ partiell differenzierbar in $x_0$`;
 
   let nodes = [];
   let closure = new Map();      // node -> Set of reachable nodes
   let adj = new Map();          // node -> Set of direct neighbors (for path reconstruction)
   let edgeExplain = new Map();  // "from::to" -> explanation text
+  let noQuizPairs = new Set();  // "A::B" pairs (declared synonyms) never asked about directly
   let history = [];             // {a,b,relation,chosen,correct,ts}
   let current = null;           // {a,b,relation}
   let historyVisible = false;
@@ -614,6 +736,20 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
     previewTimer = setTimeout(updatePreview, 250);
   });
 
+  function isSynonymLine(line){
+    return line.startsWith('~~');
+  }
+
+  function splitSynonymLine(line){
+    const rest = line.replace(/^~~\s*/, '');
+    const sepIdx = rest.indexOf('::');
+    if (sepIdx === -1) return null;
+    const left = rest.slice(0, sepIdx).trim();
+    const right = rest.slice(sepIdx + 2).trim();
+    if (!left || !right || left === right) return null;
+    return {left, right};
+  }
+
   function updatePreview(){
     const lines = catalogInput.value.split('\n');
     const eqTokens = ['<=>','<->','⇔'];
@@ -627,6 +763,15 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
       if (!line){ html += '<div class="preview-blank"></div>'; continue; }
       if (line.startsWith('#')){
         html += `<div class="preview-comment">${escapeHtml(line.replace(/^#+\s*/,''))}</div>`;
+        continue;
+      }
+      if (isSynonymLine(line)){
+        const pair = splitSynonymLine(line);
+        if (!pair){
+          html += `<div class="preview-error">⚠ Synonympaar unvollständig (erwarte "~~ A :: B"): ${escapeHtml(line)}</div>`;
+          continue;
+        }
+        html += `<div class="preview-synpair"><span class="preview-stmt">${escapeHtml(pair.left)}</span><span class="preview-synsep">≈</span><span class="preview-stmt">${escapeHtml(pair.right)}</span></div>`;
         continue;
       }
       let working = line;
@@ -694,6 +839,14 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
     renderHistoryPanel();
   });
 
+  dupCheckBtn.addEventListener('click', () => {
+    runDuplicateCheck(catalogInput.value);
+  });
+
+  dupCloseBtn.addEventListener('click', () => {
+    dupPanel.hidden = true;
+  });
+
   modeSelect.addEventListener('change', nextQuestion);
   nextBtn.addEventListener('click', nextQuestion);
 
@@ -718,6 +871,7 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
     nodes = result.nodes;
     adj = result.adj;
     edgeExplain = result.explain;
+    noQuizPairs = result.noQuiz;
     closure = buildClosure(nodes, adj);
     parseStatus.textContent = isAutoRestore
       ? `Gespeicherten Katalog geladen: ${nodes.length} Aussagen, ${result.edgeCount} Kanten.`
@@ -738,6 +892,7 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
     const nodeSet = new Set();
     const adjacency = new Map();
     const explainMap = new Map();
+    const noQuizPairs = new Set(); // "A::B" and "B::A" for each declared synonym pair
     let edgeCount = 0;
 
     const eqTokens = ['<=>','<->','⇔'];
@@ -757,6 +912,20 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
     for (let raw of lines){
       let line = raw.trim();
       if (!line || line.startsWith('#')) continue;
+
+      if (isSynonymLine(line)){
+        const pair = splitSynonymLine(line);
+        if (!pair){
+          return {error: `Synonympaar unvollständig (erwarte "~~ Aussage1 :: Aussage2"): "${line}"`};
+        }
+        addNode(pair.left); addNode(pair.right);
+        addEdge(pair.left, pair.right);
+        addEdge(pair.right, pair.left);
+        edgeCount += 2;
+        noQuizPairs.add(pair.left + '::' + pair.right);
+        noQuizPairs.add(pair.right + '::' + pair.left);
+        continue;
+      }
 
       let explanation = '';
       const explainIdx = line.indexOf('||');
@@ -784,7 +953,135 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
       else if (type === 'fwd'){ addEdge(left,right,explanation); edgeCount += 1; }
       else { addEdge(right,left,explanation); edgeCount += 1; }
     }
-    return {nodes:[...nodeSet], adj:adjacency, explain:explainMap, edgeCount};
+    return {nodes:[...nodeSet], adj:adjacency, explain:explainMap, noQuiz:noQuizPairs, edgeCount};
+  }
+
+  // --- Duplicate detection: pairwise text-similarity over all declared statements ---
+
+  function normalizeForCompare(s){
+    return s
+      .replace(/\$/g, ' ')
+      .replace(/\\[a-zA-Z]+/g, ' ')   // drop LaTeX commands (\to, \infty, ...), keep surrounding words
+      .replace(/[{}\\]/g, ' ')
+      .replace(/[.,;:()\[\]]/g, ' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function tokenize(s){
+    return normalizeForCompare(s).split(' ').filter(Boolean);
+  }
+
+  function jaccardSimilarity(tokensA, tokensB){
+    const setA = new Set(tokensA), setB = new Set(tokensB);
+    if (setA.size === 0 && setB.size === 0) return 1;
+    let inter = 0;
+    for (const t of setA) if (setB.has(t)) inter++;
+    const union = setA.size + setB.size - inter;
+    return union === 0 ? 0 : inter / union;
+  }
+
+  function levenshtein(a, b){
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    let prev = new Array(n + 1);
+    for (let j = 0; j <= n; j++) prev[j] = j;
+    for (let i = 1; i <= m; i++){
+      const cur = [i];
+      for (let j = 1; j <= n; j++){
+        const cost = a[i-1] === b[j-1] ? 0 : 1;
+        cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + cost);
+      }
+      prev = cur;
+    }
+    return prev[n];
+  }
+
+  function charSimilarity(a, b){
+    const maxLen = Math.max(a.length, b.length);
+    if (maxLen === 0) return 1;
+    return 1 - levenshtein(a, b) / maxLen;
+  }
+
+  const DUP_THRESHOLD = 0.6;
+  // Char-level comparison is O(len^2) per pair; skip it above this many statements
+  // and fall back to cheaper token-Jaccard only, so the check stays fast.
+  const DUP_CHAR_LIMIT = 250;
+
+  function findDuplicateCandidates(nodeList, closureMap, noQuiz){
+    const useChar = nodeList.length <= DUP_CHAR_LIMIT;
+    const normed = nodeList.map(n => normalizeForCompare(n));
+    const toks = nodeList.map(n => tokenize(n));
+    const results = [];
+    for (let i = 0; i < nodeList.length; i++){
+      for (let j = i + 1; j < nodeList.length; j++){
+        const a = nodeList[i], b = nodeList[j];
+        if (noQuiz && noQuiz.has(a + '::' + b)) continue; // already declared as synonym — nothing to flag
+        let score = jaccardSimilarity(toks[i], toks[j]);
+        if (useChar){
+          score = Math.max(score, charSimilarity(normed[i], normed[j]));
+        }
+        if (normed[i] === normed[j]) score = 1;
+        if (score >= DUP_THRESHOLD){
+          const related = (closureMap.get(a) && closureMap.get(a).has(b)) ||
+                          (closureMap.get(b) && closureMap.get(b).has(a));
+          results.push({a, b, score, related});
+        }
+      }
+    }
+    results.sort((x, y) => (x.related - y.related) || (y.score - x.score));
+    return {results, useChar};
+  }
+
+  function renderDuplicatePanel(list, meta){
+    if (list.length === 0){
+      dupSummary.textContent = 'Keine auffällig ähnlichen Paare gefunden.';
+      dupList.innerHTML = '';
+      dupPanel.hidden = false;
+      return;
+    }
+    const isolatedCount = list.filter(x => !x.related).length;
+    let summaryText = `${list.length} ähnliche${list.length===1?'s Paar':' Paare'} gefunden`;
+    if (isolatedCount > 0) summaryText += ` — davon ${isolatedCount} ohne Beziehung im Katalog`;
+    if (!meta.useChar) summaryText += ' (nur Wort-Vergleich, Katalog sehr groß)';
+    dupSummary.textContent = summaryText;
+
+    dupList.innerHTML = list.map(item => {
+      const cls = item.related ? 'related' : 'isolated';
+      const tag = item.related ? 'verknüpft' : '⚠ isoliert';
+      const pct = Math.round(item.score * 100);
+      return `<div class="dup-row ${cls}">
+        <div class="dup-meta"><span class="dup-tag ${cls}">${tag}</span><span>${pct}% ähnlich</span></div>
+        <div class="dup-stmt">${escapeHtml(item.a)}</div>
+        <div class="dup-stmt">${escapeHtml(item.b)}</div>
+      </div>`;
+    }).join('');
+    dupPanel.hidden = false;
+    renderMath(dupList);
+  }
+
+  function runDuplicateCheck(text){
+    const result = parseCatalog(text);
+    if (result.error){
+      dupSummary.textContent = result.error;
+      dupList.innerHTML = '';
+      dupPanel.hidden = false;
+      return;
+    }
+    if (result.nodes.length < 2){
+      dupSummary.textContent = 'Mindestens 2 Aussagen werden benötigt.';
+      dupList.innerHTML = '';
+      dupPanel.hidden = false;
+      return;
+    }
+    // Use the transitive closure, not just direct adjacency — two statements can be
+    // related via a multi-step chain (e.g. A <=> B => C) without a direct A-C edge
+    // existing in the catalog, and that must still count as "verknüpft".
+    const localClosure = buildClosure(result.nodes, result.adj);
+    const {results, useChar} = findDuplicateCandidates(result.nodes, localClosure, result.noQuiz);
+    renderDuplicatePanel(results, {useChar});
   }
 
   function buildClosure(nodeList, adjacency){
@@ -845,7 +1142,7 @@ integrierbar <=> Riemann-integrierbar || Im Kontext dieser Vorlesung dasselbe.`;
     const maxAttempts = 400;
     for (let i=0;i<maxAttempts;i++){
       const a = nodes[Math.floor(Math.random()*nodes.length)];
-      const others = nodes.filter(n => n !== a);
+      const others = nodes.filter(n => n !== a && !noQuizPairs.has(a + '::' + n));
       if (others.length === 0) continue;
 
       if (mode === 'related'){
