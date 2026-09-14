@@ -674,7 +674,19 @@ $f$ stetig differenzierbar auf $[a,b]$ => $f$ Lipschitz-stetig auf $[a,b]$
 $f$ Lipschitz-stetig auf $[a,b]$ => $f$ gleichmäßig stetig auf $[a,b]$
 $f$ gleichmäßig stetig auf $[a,b]$ => $f$ stetig auf $[a,b]$
 $f$ stetig auf $[a,b]$ => $f$ Riemann-integrierbar auf $[a,b]$
-$f$ total differenzierbar in $x_0$ => $f$ partiell differenzierbar in $x_0$`;
+$f$ total differenzierbar in $x_0$ => $f$ partiell differenzierbar in $x_0$
+
+# --- Kontrapositionen ---
+$f$ nicht stetig => $f$ nicht gleichmäßig stetig || Kontraposition von gleichmäßig stetig => stetig.
+$f$ nicht gleichmäßig stetig auf $[a,b]$ => $f$ nicht Lipschitz-stetig auf $[a,b]$ || Kontraposition von Lipschitz-stetig => gleichmäßig stetig.
+$f$ nicht Lipschitz-stetig auf $[a,b]$ => $f$ nicht stetig differenzierbar auf $[a,b]$ || Kontraposition von stetig differenzierbar => Lipschitz-stetig.
+$(a_n)$ nicht beschränkt => $(a_n)$ nicht konvergent || Kontraposition von konvergent => beschränkt.
+$(a_n)$ nicht Nullfolge => $(a_n)$ nicht konvergent || Kontraposition von konvergent => Nullfolge.
+$(a_n)$ nicht konvergent => $(a_n)$ nicht monoton und beschränkt || Kontraposition von monoton und beschränkt => konvergent.
+$\\sum a_n$ konvergiert nicht => $a_n$ ist keine Nullfolge || Kontraposition von $a_n\\to0$ ist notwendige Bedingung für die Konvergenz von $\\sum a_n$.
+$\\sum a_n^2$ divergiert => $\\sum a_n$ konvergiert nicht absolut || Kontraposition von $\\sum a_n$ absolut konvergent => $\\sum a_n^2$ konvergent.
+$f$ nicht Riemann-integrierbar => $f$ nicht stetig || Kontraposition von stetig => Riemann-integrierbar.
+$f$ nicht stetig => $f$ nicht differenzierbar || Kontraposition von differenzierbar => stetig.`;
 
   let nodes = [];
   let closure = new Map();      // node -> Set of reachable nodes
